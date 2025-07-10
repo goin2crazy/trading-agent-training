@@ -20,3 +20,5 @@ pip install stockstats
 - add day in the week, day in the month and etc✅
 
 - train the autoencoder to compress huge data into values simplier values✅
+
+- Switch reward function in FinRL TradingEnv to Sharpe Ratio reward function, which gonna make it more efficient
