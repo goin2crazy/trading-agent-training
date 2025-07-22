@@ -32,7 +32,8 @@ class AutoencoderTrainer:
                  split_ratio=0.8, 
                  checkpoint_save_dir = "autoencoder_checkpoints", 
                  checkpoint_name = None, 
-                 deep=True, ):
+                 deep=True, 
+                 tanh = True):
         
         self.input_dim = input_dim
         self.latent_dim = latent_dim
@@ -42,9 +43,10 @@ class AutoencoderTrainer:
         self.split_ratio = split_ratio
         # Defining what type of architecture going to be used
         self.deep_arch = deep
+        self.tanh = tanh
 
         if self.deep_arch: 
-            self.model = Autoencoder_Deep(input_dim, latent_dim)
+            self.model = Autoencoder_Deep(input_dim, latent_dim, tanh=self.tanh)
         else: 
             self.model = Autoencoder_Simple(input_dim, latent_dim)
 
@@ -208,6 +210,9 @@ class AutoencoderTrainer:
     def encode_df(self, df: pd.DataFrame) ->pd.DataFrame:
         # Make a copy to avoid modifying the original DataFrame passed in
         df = df.copy() 
+
+        df_copy_ = df.copy() 
+
         features = df.select_dtypes(include=np.number).columns.tolist()
         df_copy = df[features]
         # Encode the DataFrame, which handles batching internally
@@ -219,11 +224,11 @@ class AutoencoderTrainer:
 
         # Create a new DataFrame from the encoded tensors, using the original DataFrame's index
         # This ensures proper alignment when concatenating
-        encoded_df = pd.DataFrame(encoded_tensors, index=df_copy.index, columns=encoded_col_names)
+        encoded_df = pd.DataFrame(encoded_tensors, columns=encoded_col_names)
 
         # Concatenate the original DataFrame (copy) with the new encoded features DataFrame
         # axis=1 ensures columns are added
-        df_final = pd.concat([df_copy, encoded_df], axis=1)
+        df_final = pd.concat([df_copy_, encoded_df], axis=1)
 
         return df_final
 

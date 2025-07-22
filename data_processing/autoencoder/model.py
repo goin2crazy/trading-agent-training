@@ -39,7 +39,10 @@ class Autoencoder_Simple(nn.Module):
 
 # --- 2. Simplified Autoencoder ---
 class Autoencoder_Deep(nn.Module):
-    def __init__(self, input_dim: int, latent_dim: int):
+    def __init__(self, 
+                 input_dim: int, 
+                 latent_dim: int, 
+                 tanh = True):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, 256),
@@ -48,7 +51,8 @@ class Autoencoder_Deep(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 512), 
             nn.ReLU(),
-            nn.Linear(512, latent_dim)
+            nn.Linear(512, latent_dim), 
+            nn.Tanh() if tanh else nn.ReLU() 
         )
         self.decoder = nn.Sequential(
             nn.Linear(latent_dim, 128),

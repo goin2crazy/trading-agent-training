@@ -5,19 +5,37 @@ from sklearn.decomposition import PCA
 
 from stockstats import StockDataFrame
 
-# fill missing values in data 
-def fill_by_group_interpolation(df, group_col, method='linear', limit_direction='forward', order=None) -> pd.DataFrame:
-    # Identify numeric columns that need filling (excluding the group column if it's numeric)
-    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-    if group_col in numeric_cols:
-        numeric_cols.remove(group_col)
-
+def fill_by_group_interpolation(df: pd.DataFrame, 
+                                group_col: str, 
+                                time_col: str = "date", 
+                                method: str = 'linear', 
+                                limit_direction: str = 'forward', 
+                                order: int = None) -> pd.DataFrame:
     # Create a copy to avoid modifying the original DataFrame
     df_filled = df.copy()
 
+    # Identify numeric columns that need filling (excluding the group and time columns if they are numeric)
+    numeric_cols = df_filled.select_dtypes(include=np.number).columns.tolist()
+    if group_col in numeric_cols:
+        numeric_cols.remove(group_col)
+    if time_col and time_col in numeric_cols:
+        numeric_cols.remove(time_col)
+
+    # Sort the DataFrame by the group column and then by the time column (if provided)
+    # This is crucial for correct time-series interpolation within each group.
+    if time_col:
+        # Ensure the time_col is in datetime format if it's not already, for proper sorting
+        if pd.api.types.is_string_dtype(df_filled[time_col]):
+            df_filled[time_col] = pd.to_datetime(df_filled[time_col], errors='coerce')
+        df_filled = df_filled.sort_values(by=[group_col, time_col]).reset_index(drop=True)
+    else:
+        # If no time_col, just sort by group_col to ensure contiguous groups
+        df_filled = df_filled.sort_values(by=[group_col]).reset_index(drop=True)
+
+
     # Apply interpolation to each numeric column within each group
-    # The lambda function applies the interpolation to each column series for a given group
-    # transform() ensures the output is aligned with the original DataFrame's index.
+    # The transform() method ensures the output is aligned with the original DataFrame's index
+    # after the grouped operation.
     for col in numeric_cols:
         df_filled[col] = df_filled.groupby(group_col)[col].transform(
             lambda x: x.interpolate(
@@ -26,30 +44,32 @@ def fill_by_group_interpolation(df, group_col, method='linear', limit_direction=
                 order=order
             )
         )
-        # interpolation approach looks forward or backward 
-        # Thats become the reason of one missing value in dataset 
-        # Thats can be fixed simply 
+        # After group-wise interpolation, use ffill() and bfill() to catch any remaining
+        # NaNs that might occur at the very beginning or end of a group if
+        # limit_direction didn't cover them (e.g., a group starting with NaN and limit_direction='backward').
         df_filled[col] = df_filled[col].ffill().bfill()
-        
+
     return df_filled
 
 # Add some more metrics 
-def add_MACD_RSI_CC(df) -> pd.DataFrame: 
-    assert "tic" in df.columns, "Please add the ticket name column into dataframe, it needed for sorting"
-    assert "date" in df.columns, "Please add the date column into dataframe, it needed for sorting"
+# Umm, okay this feature is already realized in FinRL 
+# def add_MACD_RSI_CC(df) -> pd.DataFrame: 
+#     assert "tic" in df.columns, "Please add the ticket name column into dataframe, it needed for sorting"
+#     assert "date" in df.columns, "Please add the date column into dataframe, it needed for sorting"
 
-    required_columns = ['close', 'open', 'high', 'low', 'volume']
-    for col in required_columns: 
-        assert col in df.columns, f"Please add the {col} column into dataframe it needed for calculation"
+#     required_columns = ['close', 'open', 'high', 'low', 'volume']
+#     for col in required_columns: 
+#         assert col in df.columns, f"Please add the {col} column into dataframe it needed for calculation"
 
-    # StockDataFrame requires specific column names: 'close', 'open', 'high', 'low', 'volume'
-    # and it works better if each stock is handled separately
-    df = df.sort_values(by=['tic', 'date'])  # make sure data is sorted
-    stock_df = StockDataFrame.retype(df.copy())
 
-    # Now your DataFrame has new columns
-    print("Calculated the new columns, Update: ", stock_df.columns)
-    return stock_df
+#     # StockDataFrame requires specific column names: 'close', 'open', 'high', 'low', 'volume'
+#     # and it works better if each stock is handled separately
+#     df = df.sort_values(by=['tic', 'date'])  # make sure data is sorted
+#     stock_df = StockDataFrame.retype(df.copy())
+#     stock_df['rsi']
+#     # Now your DataFrame has new columns
+#     print("Calculated the new columns, Update: ", stock_df.columns)
+#     return stock_df
 
 # Add the day in week, day in month and month in year
 # to give a better understaning of time
