@@ -173,57 +173,39 @@ def complete_calc_buyonly(actions, prices, init_values):
     pnl = np.subtract(final_values, init_values)
     return pnl
 
-
-def execute_position_sales(tic,acts,prices,args_s,pnl_all):
-  # calculate final pnl for each ticker with sales
+def execute_position_sales(tic, acts, prices, args_s, pnl_all):
     pnl_t = []
     acts_rev = acts.copy()
-    # location of sales transactions
-    for s in args_s:  # s is scaler
-        # price_s = [prices[s]]
+
+    for s in args_s:
         act_s = [acts_rev[s]]
-        args_b = [i for i in range(s) if acts_rev[i] > 0]
+        args_b = [i for i in range(s) if acts_rev[i] > 0]  # prior buys
+
+        # 🩷 Add this check:
+        if not args_b:
+            print(f"[WARNING] No prior buy action for {tic} at step {s}, skipping this sell.")
+            continue  # skip this sale if no buys to match
+
         prcs_init_trades = prices[args_b]
         acts_init_trades = acts_rev[args_b]
-  
-        # update actions for sales
-        # reduce/eliminate init values through trades
-        # always start with earliest purchase that has not been closed through sale
-        # selectors for purchase and sales trades
-        # find earliest remaining purchase
-        arg_sel = min(args_b)
-        # sel_s = len(acts_trades) - 1
 
-        # closing part/all of earliest init trade not yet closed
-        # sales actions are negative
-        # in this test case, abs_val of init and sales share counts are same
-        # zero-out sales actions
-        # market value of sale
-        # max number of shares to be closed: may be less than # originally purchased
+        # 🩷 safe now:
+        arg_sel = min(args_b)
+
         acts_shares = min(abs(act_s.pop()), acts_rev[arg_sel])
 
-        # mv of shares when purchased
         mv_p = abs(acts_shares * prices[arg_sel])
-        # mv of sold shares
         mv_s = abs(acts_shares * prices[s])
 
-        # calc pnl
         pnl = mv_s - mv_p
-        # reduce init share count
-        # close all/part of init purchase
+
         acts_rev[arg_sel] -= acts_shares
         acts_rev[s] += acts_shares
-        # calculate pnl for trade
-        # value of associated purchase
-        
-        # find earliest non-zero positive act in acts_revs
+
         pnl_t.append(pnl)
-    
+
     pnl_op = calc_pnl_for_open_positions(acts_rev, prices)
-    #pnl_op is list
-    # add pnl_op results (if any) to pnl_t (both lists)
     pnl_t.extend(pnl_op)
-    #print(f'Total pnl for {tic}: {np.sum(pnl_t)}')
     pnl_all[tic] = np.array(pnl_t)
     return pnl_all
 

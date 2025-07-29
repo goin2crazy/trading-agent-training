@@ -23,6 +23,9 @@ class DataFrameDataset(Dataset):
 
 # --- 3. Autoencoder Trainer ---
 class AutoencoderTrainer:
+    best_checkpoint_naming = "autoencoder_best.pth"
+    last_checkpoint_naming = "autoencoder_final.pth"
+
     def __init__(self, 
                  input_dim, 
                  latent_dim, 
@@ -118,11 +121,11 @@ class AutoencoderTrainer:
             if avg_val_r2 > self.best_val_accuracy:
                 self.best_val_accuracy = avg_val_r2
 
-                checkpoint_filename = os.path.join(self.checkpoint_dir, f"autoencoder_best.pth")
+                checkpoint_filename = os.path.join(self.checkpoint_dir, self.best_checkpoint_naming)
                 self.save_checkpoint(checkpoint_filename, avg_val_r2, epoch)
                 print(f"--- Checkpoint saved at {avg_val_r2:.2f}% validation accuracy! ---")
         
-        checkpoint_filename = os.path.join(self.checkpoint_dir, f"autoencoder_final.pth")
+        checkpoint_filename = os.path.join(self.checkpoint_dir, self.last_checkpoint_naming)
         self.save_checkpoint(checkpoint_filename, avg_val_r2, epoch)
 
 
@@ -224,6 +227,12 @@ class AutoencoderTrainer:
 
         # Create a new DataFrame from the encoded tensors, using the original DataFrame's index
         # This ensures proper alignment when concatenating
+        if self.tanh == False: 
+
+            print("---Scaling all values with standart scaler---")
+            st_sc = StandardScaler()
+            encoded_tensors =st_sc.fit_transform(encoded_tensors)
+            
         encoded_df = pd.DataFrame(encoded_tensors, columns=encoded_col_names)
 
         # Concatenate the original DataFrame (copy) with the new encoded features DataFrame

@@ -1,15 +1,11 @@
 import pandas as pd
 import numpy as np
 import optuna
-import matplotlib
 from os.path import join, exists # Import 'exists' for checking file existence
-import matplotlib.pyplot as plt
 # matplotlib.use('Agg')
 import datetime
 
-from finrl.meta.preprocessor.yahoodownloader import YahooDownloader
 from finrl.meta.preprocessor.preprocessors import FeatureEngineer, data_split
-from finrl.meta.env_stock_trading.env_stocktrading import StockTradingEnv
 from finrl.agents.stablebaselines3.models import DRLAgent
 from stable_baselines3.common.logger import configure
 from finrl.meta.data_processor import DataProcessor
@@ -18,27 +14,20 @@ from finrl.plot import backtest_stats, backtest_plot, get_daily_return, get_base
 from pprint import pprint
 
 from finrl import config
-from finrl import config_tickers
 
 import os
 import json
 
 from finrl.main import check_and_make_directories
 from finrl.config import (
-    DATA_SAVE_DIR,
-    TRAINED_MODEL_DIR,
-    TENSORBOARD_LOG_DIR,
-    RESULTS_DIR,
     INDICATORS,
     TRAIN_START_DATE,
     TRAIN_END_DATE,
     TEST_START_DATE,
     TEST_END_DATE,
-    TRADE_START_DATE,
-    TRADE_END_DATE,
 )
-check_and_make_directories([DATA_SAVE_DIR, TRAINED_MODEL_DIR, TENSORBOARD_LOG_DIR, RESULTS_DIR])
 import itertools
+import multiprocessing
 from finrl.agents.stablebaselines3.models import DRLAgent,DRLEnsembleAgent
 
 
@@ -46,13 +35,17 @@ from env_train_settings import (TradingEnvBlendSharpeRation,
                                 TradePerformanceMetric, 
                                 LoggingCallback, 
                                 sample_ddpg_params_all, 
-                                sample_sac_params_all)
+                                sample_sac_params_all, 
+                                sample_ppo_params_all, 
+                                sample_net_arch
+                                )
 from data_processing import ( # Data processing 
                             load_data, 
                             fill_by_group_interpolation, 
                              add_date_features_and_onehot,
                              PCA_analisys,  
                              fit_transform_with_autoencoder)
+from training_utils import *
 import config
 
 
@@ -80,9 +73,10 @@ class Pipeline():
                  pca_analisys = True,
                  checkpoint_dir = "pipeline_checkpoint",
 
-                 model_policy = "sac", 
+                 model_policy = "ppo", 
                  tp_metric = 'avgwl',   # specified trade_param_metric: ratio avg value win/loss
                  use_default_env = True, 
+                 training_total_steps = 50_000, 
                  ):
         """
         Initializes the Pipeline object with data, date ranges, and configurations.
@@ -120,7 +114,7 @@ class Pipeline():
         self.default_env = use_default_env
         self.start_date_trade,self.end_date_trade = start_date_trade, end_date_trade
         self.tp_metric = tp_metric
-
+        self.training_total_steps  = training_total_steps
         # Initialize all parameter configurations
         self.define_parameters_configs(
             encoder_training_kwargs=encoder_training_kwargs,
@@ -172,7 +166,8 @@ class Pipeline():
             # "tech_indicator_list": INDICATORS,
             # "action_space": stock_dimension,
             "reward_scaling": 1e-4,
-            "print_verbosity": 5
+            "print_verbosity": 5, 
+            "num_stock_shares": 2, 
         }
         # Update with user-provided values
         self.env_params.update(env_training_kwargs)
@@ -244,55 +239,6 @@ class Pipeline():
                                 lc_patience=15, 
                                 lc_trial_number=5)
         self.opt_metrics.update(opt_metrics)
-    
-
-    def save_config(self, ):
-        """
-        Saves the entire pipeline configuration to a JSON file.
-
-        Args:
-            path (str): The file path (including filename) to save the config.
-        """
-        # Consolidate all configuration attributes into a single dictionary
-        config_data = {
-            "tickets": self.tickets,
-            "start_date": self.start_date,
-            "end_date": self.end_date,
-            "start_date_trade": self.start_date_trade, 
-            "end_date_trade": self.end_date_trade, 
-            
-
-            "compress_data_with_autoencoder": self.compress_data_with_autoencoder,
-            "one_hot_date_features": self.one_hot_date_features,
-            "pca_analisys": self.pca_analisys,
-
-            "checkpoint_dir": self.checkpoint_dir, 
-            "compressed_data_dir": self.compressed_data_dir,
-
-            "auto_encoder_training_params": self.auto_encoder_training_params,
-            "env_params": self.env_params,
-            "A2C_model_kwargs": self.A2C_model_kwargs,
-            "PPO_model_kwargs": self.PPO_model_kwargs,
-            "DDPG_model_kwargs": self.DDPG_model_kwargs,
-            "SAC_model_kwargs": self.SAC_model_kwargs,
-            "TD3_model_kwargs": self.TD3_model_kwargs,
-            "timesteps_dict": self.timesteps_dict, 
-            "optimization_metric": self.opt_metrics,
-
-            "model_policy": self.model_policy,
-            "use_default_env": self.default_env, 
-            "tp_metric": self.tp_metric
-
-        }
-        # Write the dictionary to a file in JSON format
-        try:
-            path = os.path.join(self.checkpoint_dir, "config.json")
-            with open(path, 'w') as f:
-                json.dump(config_data, f, indent=4)
-            print(f"Configuration successfully saved to {path}")
-        except Exception as e:
-            print(f"Error saving configuration: {e}")
-
 
     def data_process(self): 
         # load data 
@@ -300,7 +246,7 @@ class Pipeline():
         processed_file_path = os.path.join(processed_file_dir, f"compressed_{self.tickets}.csv")
 
         if exists(processed_file_path): 
-            compressed_full = pd.read_csv(processed_file_path)
+            processed_full = pd.read_csv(processed_file_path)
         else: 
             
             # Ensure the data save directory exists
@@ -352,16 +298,19 @@ class Pipeline():
             print(processed_full.columns)
 
             if self.compress_data_with_autoencoder: 
-                compressed_full, trainer = fit_transform_with_autoencoder(processed_full, 
+                autoencoder_checkpoint_path = os.path.join(self.checkpoint_dir, f"autoencoder_checkpoint_{self.tickets}")
+                self.auto_encoder_training_params.update({"checkpoint_dir": autoencoder_checkpoint_path})
+
+                processed_full, trainer = fit_transform_with_autoencoder(processed_full, 
                                                                         **self.auto_encoder_training_params)
             
             
-            print(compressed_full.columns)
+            print(processed_full.columns)
             print("---Saving the compressed data into---")
-            compressed_full.to_csv(processed_file_path, index = False )
+            processed_full.to_csv(processed_file_path, index = False )
 
         print("---Ready to start training---")
-        return compressed_full
+        return processed_full, processed_file_path
     
     def run_ensemble_validation(self, data):
         """
@@ -443,40 +392,20 @@ class Pipeline():
     # it will save the results of optimization, the best params or something like this 
     # and after that the train fn 
     # If will load the params, found by optimization, ifs there is none of them, it will use default ones 
-    def optimize(self, data, visualize = True):   
-  
-        # Okay, first, we split data 
-        train = data_split(data, self.start_date, self.end_date)
-        trade = data_split(data, self.start_date_trade,self.end_date_trade)
+        
+    def optimize(self, data_path, visualize = True):   
+        env_parameters = define_env(
+            data_path,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            start_date_trade=self.start_date_trade,
+            end_date_trade=self.end_date_trade,
+            env_params=self.env_params,
+            default_env=self.default_env
+        )
 
-        print(f'Number of training samples: {len(train)}')
-        print(f'Number of testing samples: {len(trade)}')
-
-
-        # Calculate environment dimensions
-        num_assets = len(data['tic'].unique())
-        features = [col for col in data.columns if "enc" in col]
-        state_dim = 1 + 2 * num_assets + len(features) * num_assets
-
-        print(f"Assets: {num_assets}, State Dimension: {state_dim}")
-
-        # Configure trading environment
-        env_kwargs = {
-            "state_space": state_dim,
-            "stock_dim": num_assets,
-            "tech_indicator_list": features,
-            "action_space": num_assets,
-            **self.env_params  # Inherit base configuration
-        }
-
-        if self.default_env: 
-            #Instantiate the training gym compatible environment
-            e_train_gym = StockTradingEnv(df = train, **env_kwargs)
-            e_trade_gym = StockTradingEnv(df = trade, turbulence_threshold = None, **env_kwargs)
-        else: 
-            e_train_gym = TradingEnvBlendSharpeRation(df = train, **env_kwargs), 
-            #Instantiate the trading environment
-            e_trade_gym = TradingEnvBlendSharpeRation(df = trade, turbulence_threshold = None, **env_kwargs)
+        e_train_gym, e_trade_gym = env_parameters['train_env'], env_parameters['trade_env']
+        train, trade = env_parameters['train_df'], env_parameters['trade_df']
 
         #Instantiate the training environment
         # Also instantiate our training gent
@@ -489,6 +418,8 @@ class Pipeline():
             sampling_fn = sample_sac_params_all
         elif self.model_policy == "ddpg": 
             sampling_fn = sample_ddpg_params_all
+        elif self.model_policy == "ppo": 
+            sampling_fn = sample_ppo_params_all    
         else: 
             print(f"Policy model {self.model_policy} choosen wrong, only sac or ddpg are available now")
 
@@ -514,7 +445,7 @@ class Pipeline():
                                             tb_log_name=self.model_policy,
                                             total_timesteps=self.opt_metrics['total_timesteps']
                                             )
-            trained_ddpg.save('models/{}_{}.pth'.format(self.model_policy, trial.number))
+            trained_ddpg.save(os.path.join(self.checkpoint_dir, 'models/{}_{}.pth'.format(self.model_policy, trial.number)))
             # clear_output(wait=True)
             #For the given hyperparamters, determine the account value in the trading period
             df_account_value, df_actions = DRLAgent.DRL_prediction(
@@ -535,7 +466,7 @@ class Pipeline():
         #You can also use Multivariate samplere
         #sampler = optuna.samplers.TPESampler(multivarite=True,seed=42)
         sampler = optuna.samplers.TPESampler()
-        study = optuna.create_study(study_name="ddpg_study",direction='maximize',
+        study = optuna.create_study(study_name=f"{self.model_policy}_study",direction='maximize',
                                     sampler = sampler, pruner=optuna.pruners.HyperbandPruner())
 
         logging_callback = LoggingCallback(threshold=self.opt_metrics['lc_threshold'],
@@ -544,11 +475,14 @@ class Pipeline():
         #You can increase the n_trials for a better search space scanning
         study.optimize(objective, n_trials=self.opt_metrics['n_trials'],catch=(ValueError,),callbacks=[logging_callback])
 
+
         #Get the best hyperparamters
         print('Hyperparameters after tuning',study.best_params)
 
+        optimization_results_folder = join(self.checkpoint_dir, "opt_results_{}_{}".format(self.model_policy, self.opt_metrics['n_trials']))
+        os.makedirs(optimization_results_folder, exist_ok=True)
         # Save the best parameters to a JSON file
-        saving_path = os.path.join(self.checkpoint_dir, "optimization_best_parameters.json")
+        saving_path = os.path.join(optimization_results_folder, "optimization_best_parameters.json")
         best_params = study.best_params
         with open(saving_path, 'w') as f:
             json.dump(best_params, f, indent=4)
@@ -568,25 +502,125 @@ class Pipeline():
 
             fig = plot_optimization_history(study)
             #"./"+config.RESULTS_DIR+
-            fig.write_image(os.path.join(self.checkpoint_dir, "opt_hist.png"))
+            fig.write_image(os.path.join(optimization_results_folder, "opt_hist.png"))
 
             try:
                 fig = plot_param_importances(study)
-                fig.write_image(os.path.join(self.checkpoint_dir,"params_importances.png"))
+                fig.write_image(os.path.join(optimization_results_folder,"params_importances.png"))
             except:
                 print('Cannot calculate hyperparameter importances: no variation')
             
             fig = plot_edf(study)
-            fig.write_image(os.path.join(self.checkpoint_dir, "emp_dist_func.png"))
-                
-    
-if __name__ == "__main__": 
-    print(INDICATORS)
+            fig.write_image(os.path.join(optimization_results_folder, "emp_dist_func.png"))
 
+    def train(self, data_path, compare_to_default=True):
+        
+        if compare_to_default: 
+            print("---First, training with default parameters---")
+            log_dir_default = join(self.checkpoint_dir, "training_logs", '{}_{}'.format(self.model_policy, self.training_total_steps))
+            os.makedirs(log_dir_default, exist_ok=True)
+
+            info = {
+            "data_path": data_path,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "start_date_trade": self.start_date_trade,
+            "end_date_trade": self.end_date,
+            "env_params": self.env_params,
+            "default_env": self.default_env,
+            "model_policy": self.model_policy,
+            "training_total_steps": self.training_total_steps,
+            "tpm_metric": self.tp_metric,
+            "dir": '', 
+            "checkpoint_dir": self.checkpoint_dir}
+
+            tmp_default, model_save_path = train_from_params_path(info)
+            print("---For comparison, the default training was over with results---")
+            print("---Default Model with score performance {} was saved into {}---".format(tmp_default, model_save_path))
+
+
+        optimization_result_dirs = [
+            join(self.checkpoint_dir, d) for d in os.listdir(self.checkpoint_dir)
+            if os.path.isdir(os.path.join(self.checkpoint_dir, d)) and
+               d.startswith("opt_results") and
+               self.model_policy in d
+        ]
+        infoss = [{
+            "data_path": data_path,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "start_date_trade": self.start_date_trade,
+            "end_date_trade": self.end_date,
+            "env_params": self.env_params,
+            "default_env": self.default_env,
+            "model_policy": self.model_policy,
+            "training_total_steps": self.training_total_steps,
+            "tpm_metric": self.tp_metric,
+            "dir": dir, 
+            "checkpoint_dir": self.checkpoint_dir
+            } for dir in optimization_result_dirs]
+
+        num_workers = 5 # multiprocessing.cpu_count()
+        print("---{} Processes will work in paralell---".format(num_workers))
+        with multiprocessing.Pool(num_workers) as pool:
+            training_results = pool.map(train_from_params_path, infoss)
+
+        sorted_training_results = sorted(training_results, key=lambda i: i['score'])
+        print("---MultiProcessedTraining was over with this results---")
+        pprint(sorted_training_results)
+        
+        return sorted_training_results
+
+    def validate_saved_models(self, data_path):
+        # 1️⃣ Locate all your saved model files
+        model_dir = os.path.join(self.checkpoint_dir, "models")
+        model_files = [
+            f for f in os.listdir(model_dir)
+            if f.endswith(".pth") or f.endswith(".zip")
+        ]
+        if not model_files:
+            print("No saved models found in", model_dir)
+            return
+
+        # 2️⃣ Build a list of `info` dicts—one per model
+        info_list = []
+        for fname in model_files:
+            info = {
+                **{
+                    "data_path":        data_path,
+                    "start_date":       self.start_date,
+                    "end_date":         self.end_date,
+                    "start_date_trade": self.start_date_trade,
+                    "end_date_trade":   self.end_date_trade,
+                    "env_params":       self.env_params,
+                    "default_env":      self.default_env,
+                    "model_policy":     self.model_policy,
+                    "tpm_metric":       self.tp_metric,
+                },
+                "model_path":      os.path.join(model_dir, fname),
+                "checkpoint_path": self.checkpoint_dir,
+            }
+            info_list.append(info)
+
+        # 3️⃣ Fire up a pool to validate them in parallel!
+        print(f"Starting validation of {len(info_list)} models…")
+        with multiprocessing.Pool(processes=min(len(info_list), os.cpu_count())) as pool:
+            pool.map(validate_model_by_path, info_list)
+
+        print("All validations complete, sweetie~ 💖")
+
+
+
+
+if __name__ == "__main__": 
     # initialize pipeline 
     pipe = Pipeline(tickets=config.stock_names, 
                     end_date=config.TRAIN_END_DATE, 
                     start_date=config.TRAIN_START_DATE, 
+
+                    checkpoint_dir="non_compressed_checkpoint", 
+                    compress_data_with_autoencoder=False, 
+                    one_hot_date_features=False, 
 
                     end_date_trade=config.TRADE_END_DATE, 
                     start_date_trade=config.TRADE_START_DATE, 
@@ -594,9 +628,17 @@ if __name__ == "__main__":
                                                     batch_size =128, 
                                                     epochs = 15, 
                                                     latent_space=7,
-                                                    checkpoint_dir="autoencoder_checkpoints_7", 
-                                                    deep = True, )
+                                                    deep = True, 
+                                                    tanh=False),
+                    optimization_metrics={'n_trials': 50,
+                                          "lc_trial_number":50,
+                                          'total_timesteps':2500, }, 
+
+                                          
+                    training_total_steps=20_000, 
                     )
     
-    compressed_df = pipe.data_process()
-    pipe.optimize(compressed_df)
+    _, data_path = pipe.data_process()
+    pipe.optimize(data_path)
+
+    pipe.train()

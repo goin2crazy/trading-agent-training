@@ -20,6 +20,9 @@ class Autoencoder_Simple(nn.Module):
             nn.ReLU(),
             nn.Linear(128, input_dim)
         )
+        
+        print("---Model initialized---")
+        print(self.encoder)
 
     def forward(self, x):
         encoded = self.encoder(x)
@@ -52,8 +55,9 @@ class Autoencoder_Deep(nn.Module):
             nn.Linear(128, 512), 
             nn.ReLU(),
             nn.Linear(512, latent_dim), 
-            nn.Tanh() if tanh else nn.ReLU() 
         )
+        if tanh: 
+            self.encoder.add_module(nn.Tanh)
         self.decoder = nn.Sequential(
             nn.Linear(latent_dim, 128),
             nn.ReLU(),
@@ -61,6 +65,8 @@ class Autoencoder_Deep(nn.Module):
             nn.ReLU(),
             nn.Linear(512, input_dim)
         )
+        print("---Model initialized---")
+        print(self.encoder)
 
     def forward(self, x):
         encoded = self.encoder(x)
