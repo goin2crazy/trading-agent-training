@@ -30,6 +30,9 @@ This project documents the process of training a stock trading agent using a **R
 
     **Optuna**, an automatic hyperparameter optimization framework, was integrated into the training pipeline. This allows for systematic exploration of the hyperparameter space for the **PPO (Proximal Policy Optimization)** algorithm used in FinRL. Optuna helps identify the optimal combination of hyperparameters that maximize the trading agent's performance (e.g., higher Sharpe Ratio, lower drawdown).
 
+- **validation**
+- **GPU**
+
 ---
 
 ### Optuna Optimization Results of PPO FinRL Training
@@ -53,3 +56,4 @@ This graph visualizes the objective value (e.g., Sharpe Ratio) over each trial d
 This chart indicates the relative importance of each hyperparameter in influencing the objective function (e.g., Sharpe Ratio). Hyperparameters with higher importance scores had a more significant impact on the trading agent's performance during the optimization process, helping to identify which parameters are crucial for fine-tuning.
 
 ![Parameter Importances](pipeline_checkpoint/params_importances.png)
+

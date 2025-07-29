@@ -23,7 +23,7 @@ from finrl.config import (
     INDICATORS,
 )
 from finrl.agents.stablebaselines3.models import DRLAgent,DRLEnsembleAgent
-
+import torch 
 
 from env_train_settings import (TradingEnvBlendSharpeRation, 
                                 TradePerformanceMetric,
@@ -162,6 +162,7 @@ def train_from_params_path(info, ):
         policy_kwargs = dict(net_arch=net_arch)
         hyperparameters = best_params
 
+    hyperparameters.update({"device": 'cuda' if torch.cuda.is_available() else 'cpu'})
     tpm, model = train_from_params(
         agent=agent,
         model_policy=info['model_policy'],
@@ -248,4 +249,5 @@ def validate_model_by_path(info):
 
     perf_stats_all_tuned.to_csv(results_path)
     print("---Performanse Stats saved into {}---".format(results_path))
+    
  

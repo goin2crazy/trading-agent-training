@@ -30,6 +30,7 @@ import itertools
 import multiprocessing
 from finrl.agents.stablebaselines3.models import DRLAgent,DRLEnsembleAgent
 
+import torch 
 
 from env_train_settings import (TradingEnvBlendSharpeRation, 
                                 TradePerformanceMetric, 
@@ -437,9 +438,12 @@ class Pipeline():
                 policy_kwargs = hyperparameters['policy_kwargs']
                 del hyperparameters['policy_kwargs']
                 #print(f'Policy keyword arguments {policy_kwargs}')
+
+            hyperparameters.update({"device": 'cuda' if torch.cuda.is_available() else 'cpu'})
             model_ddpg = agent.get_model(self.model_policy,
                                         policy_kwargs = policy_kwargs,
-                                        model_kwargs = hyperparameters )
+                                        model_kwargs = hyperparameters
+                                          )
             #You can increase it for better comparison
             trained_ddpg = agent.train_model(model=model_ddpg,
                                             tb_log_name=self.model_policy,
