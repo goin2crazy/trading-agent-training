@@ -4,4 +4,3 @@ datasets/
 trained_models/
 tensorboard_log/
 results/
-*checkpoint/

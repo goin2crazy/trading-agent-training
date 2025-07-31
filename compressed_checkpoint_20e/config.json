@@ -1,0 +1,76 @@
+{
+    "checkpoint_dir": "compressed_checkpoint_20e",
+    "tickets": null,
+    "start_date": "2000-01-01",
+    "end_date": "2024-12-30",
+    "compress_data_with_autoencoder": true,
+    "one_hot_date_features": true,
+    "pca_analisys": true,
+    "compressed_data_dir": "compressed_checkpoint_20e\\compressed",
+    "model_policy": "ppo",
+    "default_env": true,
+    "start_date_trade": "2024-01-30",
+    "end_date_trade": "2025-07-07",
+    "tp_metric": "avgwl",
+    "training_total_steps": 20000,
+    "auto_encoder_training_params": {
+        "learning_rate": 0.0005,
+        "batch_size": 128,
+        "epochs": 20,
+        "latent_space": 7,
+        "checkpoint_dir": "autoencoder_checkpoints_7",
+        "deep": true,
+        "tanh": false
+    },
+    "env_params": {
+        "hmax": 100,
+        "initial_amount": 1000000,
+        "buy_cost_pct": 0.001,
+        "sell_cost_pct": 0.001,
+        "reward_scaling": 0.0001,
+        "print_verbosity": 5,
+        "num_stock_shares": 2
+    },
+    "A2C_model_kwargs": {
+        "n_steps": 5,
+        "ent_coef": 0.005,
+        "learning_rate": 0.0007
+    },
+    "PPO_model_kwargs": {
+        "ent_coef": 0.01,
+        "n_steps": 2048,
+        "learning_rate": 0.00025,
+        "batch_size": 128
+    },
+    "DDPG_model_kwargs": {
+        "buffer_size": 10000,
+        "learning_rate": 0.0005,
+        "batch_size": 64
+    },
+    "SAC_model_kwargs": {
+        "batch_size": 64,
+        "buffer_size": 100000,
+        "learning_rate": 0.0001,
+        "learning_starts": 100,
+        "ent_coef": "auto_0.1"
+    },
+    "TD3_model_kwargs": {
+        "batch_size": 100,
+        "buffer_size": 1000000,
+        "learning_rate": 0.0001
+    },
+    "timesteps_dict": {
+        "a2c": 10000,
+        "ppo": 10000,
+        "ddpg": 10,
+        "sac": 10,
+        "td3": 10
+    },
+    "opt_metrics": {
+        "n_trials": 5,
+        "total_timesteps": 2500,
+        "lc_threshold": 1e-05,
+        "lc_patience": 15,
+        "lc_trial_number": 5
+    }
+}

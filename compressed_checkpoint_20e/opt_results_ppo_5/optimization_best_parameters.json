@@ -1,0 +1,10 @@
+{
+    "gamma": 0.96,
+    "gae_lambda": 0.98,
+    "clip_range": 0.2,
+    "ent_coef": 0.05,
+    "vf_coef": 0.7,
+    "max_grad_norm": 0.8,
+    "n_epochs": 5,
+    "net_arch": "big"
+}

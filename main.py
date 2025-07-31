@@ -129,6 +129,27 @@ class Pipeline():
             opt_metrics=optimization_metrics
         )
 
+    def save_config(self, filepath=None):
+        if filepath is None:
+            filepath = os.path.join(self.checkpoint_dir, "config.json")
+        config_dict = self.__dict__.copy()
+        
+        # Remove any non-serializable items if needed (like functions)
+        for k, v in list(config_dict.items()):
+            try:
+                json.dumps(v)
+            except:
+                config_dict.pop(k)
+        
+        with open(filepath, "w") as f:
+            json.dump(config_dict, f, indent=4)
+
+    @classmethod
+    def from_config(cls, filepath):
+        with open(filepath, "r") as f:
+            config_dict = json.load(f)
+        return cls(**config_dict)
+
     def define_parameters_configs(self,
                                   encoder_training_kwargs: dict,
                                   env_training_kwargs: dict,
@@ -614,35 +635,138 @@ class Pipeline():
         print("All validations complete, sweetie~ 💖")
 
 
+def compare_validation_results(validation_tables_path: list):
+    """
+    Arguments: 
+        validation_tables_path must be like
+        [
+            {"name": "run_number1", 
+             "path": "run_number1_results.csv", 
+             "description": "What trained with compression"},
+            ...
+        ]
 
+    Returns: 
+        Saves the summary table and comparison plots with results
+        Returns dict with paths to saved objects
+    """
+    results_df = pd.DataFrame()
 
-if __name__ == "__main__": 
-    # initialize pipeline 
-    pipe = Pipeline(tickets=config.stock_names, 
-                    end_date=config.TRAIN_END_DATE, 
-                    start_date=config.TRAIN_START_DATE, 
+    for result in validation_tables_path:
+        df = pd.read_csv(result["path"], index_col=0)
+        df = df.rename(columns={"Value": result["name"]})
+        results_df = pd.concat([results_df, df[result["name"]]], axis=1)
 
-                    checkpoint_dir="non_compressed_checkpoint", 
-                    compress_data_with_autoencoder=False, 
-                    one_hot_date_features=False, 
+    # Transpose for easier plotting
+    results_df_T = results_df.T
+    results_df_T["Description"] = [x["description"] for x in validation_tables_path]
 
-                    end_date_trade=config.TRADE_END_DATE, 
-                    start_date_trade=config.TRADE_START_DATE, 
-                    encoder_training_kwargs = dict(learning_rate=5e-4, 
-                                                    batch_size =128, 
-                                                    epochs = 15, 
-                                                    latent_space=7,
-                                                    deep = True, 
-                                                    tanh=False),
-                    optimization_metrics={'n_trials': 50,
-                                          "lc_trial_number":50,
-                                          'total_timesteps':2500, }, 
+    os.makedirs("comparison_results", exist_ok=True)
+    summary_path = "comparison_results/summary_table.csv"
+    results_df_T.to_csv(summary_path)
 
-                                          
-                    training_total_steps=20_000, 
-                    )
+    # Plot Sharpe ratio & Trade performance comparison
+    plot_path = "comparison_results/sharpe_trade_perf_comparison.png"
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    bar_width = 0.35
+    index = range(len(results_df_T))
     
-    _, data_path = pipe.data_process()
-    pipe.optimize(data_path)
+    ax1.bar([i - bar_width/2 for i in index], results_df_T["Sharpe ratio"], 
+            bar_width, label='Sharpe Ratio', color='skyblue')
+    ax1.bar([i + bar_width/2 for i in index], results_df_T["Trade_Perf"], 
+            bar_width, label='Trade Performance', color='salmon')
 
-    pipe.train()
+    ax1.set_xticks(index)
+    ax1.set_xticklabels(results_df_T.index, rotation=45, ha='right')
+    ax1.set_ylabel("Metrics")
+    ax1.set_title("Sharpe Ratio & Trade Performance Comparison")
+    ax1.legend()
+    plt.tight_layout()
+    plt.savefig(plot_path)
+    plt.close()
+
+    return {
+        "summary_table": summary_path,
+        "plot": plot_path
+    }
+
+
+
+if __name__ == "__main__":
+
+    # initialize pipeline
+    # pipe = Pipeline(tickets=config.stock_names,
+    #                 end_date=config.TRAIN_END_DATE,
+    #                 start_date=config.TRAIN_START_DATE,
+
+    #                 checkpoint_dir="non_pca_compressed_checkpoint",
+    #                 compress_data_with_autoencoder=False,
+    #                 one_hot_date_features=False,
+    #                 pca_analisys=False, 
+
+    #                 end_date_trade=config.TRADE_END_DATE,
+    #                 start_date_trade=config.TRADE_START_DATE,
+    #                 encoder_training_kwargs = dict(learning_rate=5e-4,
+    #                                                 batch_size =128,
+    #                                                 epochs = 15,
+    #                                                 latent_space=7,
+    #                                                 deep = True,
+    #                                                 tanh=False),
+    #                 optimization_metrics={'n_trials': 5,
+    #                                       "lc_trial_number":5,
+    #                                       'total_timesteps':2500, },
+
+
+    #                 training_total_steps=20_000,
+    #                 )
+
+    # _, data_path = pipe.data_process()
+    # pipe.optimize(data_path)
+    # pipe.train(data_path)
+    # pipe.validate_saved_models(data_path)
+    # pipe.save_config()
+
+
+    # Compare the validation results 
+    compare_validation_results(
+        [
+            dict(
+                path = r"non_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+                description = "Optimization with 5 Trials, with 20_000 steps of training", 
+                name = "optimized_non_compressed", 
+                 ), 
+            dict(
+                path = r"non_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
+                description = "Default hiperparameters, with 20_000 steps of training",
+                name = "default_non_compressed", 
+                 ), 
+            dict(
+                path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+                description = "No PCA analisys in dataprocessing, Optimized with 5 Trials, with 20_000 steps of training",
+                name = "optimized_non_compressed_non_pca", 
+                 ), 
+            dict(
+                path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
+                description = "No PCA analisys in dataprocessing, Default parameters, with 20_000 steps of training",
+                name = "default_non_compressed_non_pca", 
+                 ), 
+
+            dict(
+                path = r"pipeline_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+                description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (15 epochs), Optimized with 5 trials, with 20_000 steps of training",
+                name = "optimized_full_compressed_data_15e", 
+                 ), 
+
+            dict(
+                path = r"compressed_checkpoint_20e\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+                description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Optimized with 5 trials, with 20_000 steps of training",
+                name = "optimized_full_compressed_data_20e", 
+                 ), 
+            dict(
+                path = r"compressed_checkpoint_20e\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
+                description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Default Parameters, with 20_000 steps of training",
+                name = "default_full_compressed_data_20e", 
+                 ), 
+        ]
+    )
