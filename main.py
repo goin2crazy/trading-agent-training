@@ -647,7 +647,7 @@ class Pipeline():
 
         print("All validations complete, sweetie~ 💖")
 
-    def predict(self, data=None, data_is_ready=False): 
+    def predict(self, data=None, data_is_ready=False, remove_temp_data = True): 
         """
             Arguments : 
                 data - Dataframe of stocks prices and other teachnical indicators 
@@ -706,18 +706,12 @@ class Pipeline():
         with multiprocessing.Pool(processes=min(len(info_list), os.cpu_count())) as pool:
             outputs = pool.map(predict_model_path_data_by_path, info_list)
 
-        updated_outputs_list = [] 
-        print("All prediction complete")
-        for item in outputs: 
-            updated_outputs = {} 
-            updated_outputs['actions_df'] = pd.read_csv(item['actions_path'])
-            updated_outputs['accaunt_value'] = pd.read_csv(item['accaunt_value_path'])
-            updated_outputs['model_name'] = item['model_name']
-            updated_outputs_list.append(updated_outputs)
 
-        import shutil
-        shutil.rmtree(temp_dir)
-        return updated_outputs_list
+        if remove_temp_data: 
+            import shutil
+            shutil.rmtree(temp_dir)
+        
+        return outputs
 
 def compare_validation_results(validation_tables_path: list):
     """
@@ -821,5 +815,5 @@ if __name__ == "__main__":
     
     pipe = Pipeline.from_config("non_compressed_checkpoint\config.json")
     data = load_data(start_time='2023-01-01', end_time='2025-07-31', stock_names=None)
-    r = pipe.predict(data)
+    r = pipe.predict(data, remove_temp_data=False)
     print(r)

@@ -317,20 +317,17 @@ def predict_model_path_data_by_path(info:dict = {}, # must contain
 
     tuned_model = tuned_model.load(model_path)
 
-    # Predicting 
-    df_account_value, df_actions = DRLAgent.DRL_prediction(
-    model=tuned_model,
-    environment=trade_env)
-    
-    # Saving 
-    os.makedirs(output_saving_dir, exist_ok=True )
-    df_account_value_path = join(output_saving_dir, "account_value.csv")
-    df_account_value.to_csv(df_account_value_path, index = False )
+    # 2. Reset env and get to last state
+    obs, _ = trade_env.reset()
+    done = False
 
-    df_actions_path = join(output_saving_dir, "actions.csv")
-    df_actions.to_csv(df_actions_path, index=False )
-    
-    return {"accaunt_value_path": df_account_value_path, 
-            "actions_path": df_actions_path, 
+    while not done:
+        action, _ = tuned_model.predict(obs)
+        obs, reward, done, *_= trade_env.step(action)
+
+    # 3. Predict next day's action from last obs
+    predicted_action, _ = tuned_model.predict(obs)
+    # Saving 
+    return {"predicted_action": predicted_action, 
             "model_name": os.path.basename(model_path)}
     
