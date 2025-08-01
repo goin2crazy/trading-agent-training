@@ -58,15 +58,15 @@ class Pipeline():
                  start_date_trade, 
                  end_date_trade, 
 
-                 encoder_training_kwargs: dict = {},
-                 env_training_kwargs: dict = {},
-                 a2c_model_kwargs: dict = {},
-                 ppo_model_kwargs: dict = {},
-                 ddpg_model_kwargs: dict = {},
-                 sac_model_kwargs: dict = {},
-                 td3_model_kwargs: dict = {},
-                 timesteps_dict_kwargs: dict = {},
-                 optimization_metrics:dict = {}, 
+                 auto_encoder_training_params: dict = {},
+                 env_params: dict = {},
+                 A2C_model_kwargs: dict = {},
+                 PPO_model_kwargs: dict = {},
+                 DDPG_model_kwargs: dict = {},
+                 SAC_model_kwargs: dict = {},
+                 TD3_model_kwargs: dict = {},
+                 timesteps_dict: dict = {},
+                 opt_metrics:dict = {}, 
                 
 
                  compress_data_with_autoencoder = True,
@@ -76,8 +76,9 @@ class Pipeline():
 
                  model_policy = "ppo", 
                  tp_metric = 'avgwl',   # specified trade_param_metric: ratio avg value win/loss
-                 use_default_env = True, 
+                 default_env = True, 
                  training_total_steps = 50_000, 
+                 tickers_in_data = []
                  ):
         """
         Initializes the Pipeline object with data, date ranges, and configurations.
@@ -109,24 +110,24 @@ class Pipeline():
         self.one_hot_date_features = one_hot_date_features
         self.pca_analisys = pca_analisys
 
-        self.compressed_data_dir = os.path.join(self.checkpoint_dir, "compressed") 
         # training 
         self.model_policy = model_policy
-        self.default_env = use_default_env
+        self.default_env = default_env
         self.start_date_trade,self.end_date_trade = start_date_trade, end_date_trade
         self.tp_metric = tp_metric
         self.training_total_steps  = training_total_steps
+        self.tickers_in_data =tickers_in_data 
         # Initialize all parameter configurations
         self.define_parameters_configs(
-            encoder_training_kwargs=encoder_training_kwargs,
-            env_training_kwargs=env_training_kwargs,
-            a2c_model_kwargs=a2c_model_kwargs,
-            ppo_model_kwargs=ppo_model_kwargs,
-            ddpg_model_kwargs=ddpg_model_kwargs,
-            sac_model_kwargs=sac_model_kwargs,
-            td3_model_kwargs=td3_model_kwargs,
-            timesteps_dict_kwargs=timesteps_dict_kwargs, 
-            opt_metrics=optimization_metrics
+            encoder_training_kwargs=auto_encoder_training_params,
+            env_training_kwargs=env_params,
+            a2c_model_kwargs=A2C_model_kwargs,
+            ppo_model_kwargs=PPO_model_kwargs,
+            ddpg_model_kwargs=DDPG_model_kwargs,
+            sac_model_kwargs=SAC_model_kwargs,
+            td3_model_kwargs=TD3_model_kwargs,
+            timesteps_dict_kwargs=timesteps_dict, 
+            opt_metrics=opt_metrics
         )
 
     def save_config(self, filepath=None):
@@ -262,9 +263,58 @@ class Pipeline():
                                 lc_trial_number=5)
         self.opt_metrics.update(opt_metrics)
 
+    def actual_data_processing(self, df):
+        # adding some more technical values 
+        fe = FeatureEngineer(
+                    use_technical_indicator=True,
+                    tech_indicator_list = INDICATORS,
+                    use_vix=True,
+                    use_turbulence=True,
+                    user_defined_feature = False)
+
+        processed = fe.preprocess_data(df)
+
+        list_ticker = processed["tic"].unique().tolist()
+        list_date = list(pd.date_range(processed['date'].min(),processed['date'].max()).astype(str))
+        combination = list(itertools.product(list_date,list_ticker))
+
+        processed_full = pd.DataFrame(combination,columns=["date","tic"]).merge(processed,on=["date","tic"],how="left")
+        processed_full = processed_full[processed_full['date'].isin(processed['date'])]
+        processed_full = processed_full.sort_values(['date','tic'])
+
+        processed_full = fill_by_group_interpolation(processed_full, group_col='tic')
+
+        # Debugging 
+        print(processed_full.columns)
+
+        print("---Features added into dataset---")
+        print(processed_full.sort_values(['date','tic'],ignore_index=True).head(10))
+        print("---Full shape of Dataset---", processed_full.shape)
+
+        if self.pca_analisys: 
+            print("---Adding the PCA analisys values---")
+            processed_full = PCA_analisys(processed_full)
+
+        if self.one_hot_date_features: 
+            processed_full = add_date_features_and_onehot(processed_full)
+
+        print(processed_full.columns)
+
+        if self.compress_data_with_autoencoder: 
+            # Since there supposed to the saved in checkpoint 
+            # Its actually supposed to work there 
+
+            autoencoder_checkpoint_path = os.path.join(self.checkpoint_dir, f"autoencoder_checkpoint_{self.tickets}")
+            self.auto_encoder_training_params.update({"checkpoint_dir": autoencoder_checkpoint_path})
+
+            processed_full, trainer = fit_transform_with_autoencoder(processed_full, 
+                                                                    **self.auto_encoder_training_params)
+        
+        return processed_full
+
     def data_process(self): 
         # load data 
-        processed_file_dir = self.compressed_data_dir
+        processed_file_dir = os.path.join(self.checkpoint_dir, "compressed") 
         processed_file_path = os.path.join(processed_file_dir, f"compressed_{self.tickets}.csv")
 
         if exists(processed_file_path): 
@@ -282,56 +332,19 @@ class Pipeline():
                         end_time=self.end_date, 
                         stock_names=self.tickets, 
                         )
-
-            # adding some more technical values 
-            fe = FeatureEngineer(
-                        use_technical_indicator=True,
-                        tech_indicator_list = INDICATORS,
-                        use_vix=True,
-                        use_turbulence=True,
-                        user_defined_feature = False)
-
-            processed = fe.preprocess_data(df)
-
-            list_ticker = processed["tic"].unique().tolist()
-            list_date = list(pd.date_range(processed['date'].min(),processed['date'].max()).astype(str))
-            combination = list(itertools.product(list_date,list_ticker))
-
-            processed_full = pd.DataFrame(combination,columns=["date","tic"]).merge(processed,on=["date","tic"],how="left")
-            processed_full = processed_full[processed_full['date'].isin(processed['date'])]
-            processed_full = processed_full.sort_values(['date','tic'])
-
-            processed_full = fill_by_group_interpolation(processed_full, group_col='tic')
-
-            # Debugging 
-            print(processed_full.columns)
-
-            print("---Features added into dataset---")
-            print(processed_full.sort_values(['date','tic'],ignore_index=True).head(10))
-            print("---Full shape of Dataset---", processed_full.shape)
-
-            if self.pca_analisys: 
-                print("---Adding the PCA analisys values---")
-                processed_full = PCA_analisys(processed_full)
-
-            if self.one_hot_date_features: 
-                processed_full = add_date_features_and_onehot(processed_full)
-
-            print(processed_full.columns)
-
-            if self.compress_data_with_autoencoder: 
-                autoencoder_checkpoint_path = os.path.join(self.checkpoint_dir, f"autoencoder_checkpoint_{self.tickets}")
-                self.auto_encoder_training_params.update({"checkpoint_dir": autoencoder_checkpoint_path})
-
-                processed_full, trainer = fit_transform_with_autoencoder(processed_full, 
-                                                                        **self.auto_encoder_training_params)
             
-            
+            processed_full = self.actual_data_processing(df)
+
             print(processed_full.columns)
             print("---Saving the compressed data into---")
             processed_full.to_csv(processed_file_path, index = False )
 
         print("---Ready to start training---")
+        
+        # Sometimes, where we are you using the data from, 2010
+        # some companies may not have any data of stocks, because they didnt had stocks 
+        # So, to know which tickers exactly is in data where for the next time - we gonna save it
+        self.tickers_in_data = list(processed_full['tic'].unique())
         return processed_full, processed_file_path
     
     def run_ensemble_validation(self, data):
@@ -634,6 +647,77 @@ class Pipeline():
 
         print("All validations complete, sweetie~ 💖")
 
+    def predict(self, data=None, data_is_ready=False): 
+        """
+            Arguments : 
+                data - Dataframe of stocks prices and other teachnical indicators 
+                data
+            Returns 
+        """
+        # Since we using the multiprocessing and cant send the classes like DataFrame into the Pool 
+        # We gonna create a tamporarely folder to save all temporarell data 
+        temp_dir = join(self.checkpoint_dir, "temp")
+        os.makedirs(temp_dir, exist_ok=True )
+
+        # Process data if its not processed already 
+        if data_is_ready==False: 
+            
+            if "tic" not in data.columns:
+                raise ValueError("Input data must contain a 'tic' column for ticker symbols.")
+
+            # Keep only rows with tickers that are in self.tickers_in_data
+            data = data[data["tic"].isin(self.tickers_in_data)].copy()
+
+            # Optionally sort by date + ticker to keep it organized
+            data.sort_values(by=["date", "tic"], inplace=True)
+
+
+            processed_data = self.actual_data_processing(data)
+        else: 
+            processed_data = data 
+        processed_data_path = join(temp_dir, "data.csv")
+        processed_data.to_csv(processed_data_path, index=False)
+
+        # Locate all saved model files
+        model_dir = os.path.join(self.checkpoint_dir, "models")
+        model_files = [
+            f for f in os.listdir(model_dir)
+            if f.endswith(".pth") or f.endswith(".zip")
+        ]
+        if not model_files:
+            print("No saved models found in", model_dir)
+            return
+
+        info_list = []
+        for fname in model_files:
+            info = {
+                **{
+                    "env_params":       self.env_params,
+                    "default_env":      self.default_env,
+                    "model_policy":     self.model_policy,
+                },
+                "data_path": processed_data_path, 
+                "model_path": os.path.join(model_dir, fname),
+                "output_saving_dir": join(temp_dir, os.path.basename(fname)),
+            }
+            info_list.append(info)
+
+        print(f"Starting prediction with {len(info_list)} models…")
+        with multiprocessing.Pool(processes=min(len(info_list), os.cpu_count())) as pool:
+            outputs = pool.map(predict_model_path_data_by_path, info_list)
+
+        updated_outputs_list = [] 
+        print("All prediction complete")
+        for item in outputs: 
+            updated_outputs = {} 
+            updated_outputs['actions_df'] = pd.read_csv(item['actions_path'])
+            updated_outputs['accaunt_value'] = pd.read_csv(item['accaunt_value_path'])
+            updated_outputs['model_name'] = item['model_name']
+            updated_outputs_list.append(updated_outputs)
+
+        import shutil
+        shutil.rmtree(temp_dir)
+        return updated_outputs_list
 
 def compare_validation_results(validation_tables_path: list):
     """
@@ -663,7 +747,7 @@ def compare_validation_results(validation_tables_path: list):
 
     os.makedirs("comparison_results", exist_ok=True)
     summary_path = "comparison_results/summary_table.csv"
-    results_df_T.to_csv(summary_path)
+    results_df_T.to_csv(summary_path, index=False)
 
     # Plot Sharpe ratio & Trade performance comparison
     plot_path = "comparison_results/sharpe_trade_perf_comparison.png"
@@ -694,79 +778,48 @@ def compare_validation_results(validation_tables_path: list):
 
 
 if __name__ == "__main__":
-
-    # initialize pipeline
-    # pipe = Pipeline(tickets=config.stock_names,
-    #                 end_date=config.TRAIN_END_DATE,
-    #                 start_date=config.TRAIN_START_DATE,
-
-    #                 checkpoint_dir="non_pca_compressed_checkpoint",
-    #                 compress_data_with_autoencoder=False,
-    #                 one_hot_date_features=False,
-    #                 pca_analisys=False, 
-
-    #                 end_date_trade=config.TRADE_END_DATE,
-    #                 start_date_trade=config.TRADE_START_DATE,
-    #                 encoder_training_kwargs = dict(learning_rate=5e-4,
-    #                                                 batch_size =128,
-    #                                                 epochs = 15,
-    #                                                 latent_space=7,
-    #                                                 deep = True,
-    #                                                 tanh=False),
-    #                 optimization_metrics={'n_trials': 5,
-    #                                       "lc_trial_number":5,
-    #                                       'total_timesteps':2500, },
-
-
-    #                 training_total_steps=20_000,
-    #                 )
-
-    # _, data_path = pipe.data_process()
-    # pipe.optimize(data_path)
-    # pipe.train(data_path)
-    # pipe.validate_saved_models(data_path)
-    # pipe.save_config()
-
-
     # Compare the validation results 
-    compare_validation_results(
-        [
-            dict(
-                path = r"non_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-                description = "Optimization with 5 Trials, with 20_000 steps of training", 
-                name = "optimized_non_compressed", 
-                 ), 
-            dict(
-                path = r"non_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
-                description = "Default hiperparameters, with 20_000 steps of training",
-                name = "default_non_compressed", 
-                 ), 
-            dict(
-                path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-                description = "No PCA analisys in dataprocessing, Optimized with 5 Trials, with 20_000 steps of training",
-                name = "optimized_non_compressed_non_pca", 
-                 ), 
-            dict(
-                path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
-                description = "No PCA analisys in dataprocessing, Default parameters, with 20_000 steps of training",
-                name = "default_non_compressed_non_pca", 
-                 ), 
+    # models_data = [
+    #         dict(
+    #             path = r"non_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+    #             description = "Optimization with 5 Trials, with 20_000 steps of training", 
+    #             name = "optimized_non_compressed", 
+    #              ), 
+    #         dict(
+    #             path = r"non_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
+    #             description = "Default hiperparameters, with 20_000 steps of training",
+    #             name = "default_non_compressed", 
+    #              ), 
+    #         dict(
+    #             path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+    #             description = "No PCA analisys in dataprocessing, Optimized with 5 Trials, with 20_000 steps of training",
+    #             name = "optimized_non_compressed_non_pca", 
+    #              ), 
+    #         dict(
+    #             path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
+    #             description = "No PCA analisys in dataprocessing, Default parameters, with 20_000 steps of training",
+    #             name = "default_non_compressed_non_pca", 
+    #              ), 
 
-            dict(
-                path = r"pipeline_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-                description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (15 epochs), Optimized with 5 trials, with 20_000 steps of training",
-                name = "optimized_full_compressed_data_15e", 
-                 ), 
+    #         dict(
+    #             path = r"pipeline_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+    #             description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (15 epochs), Optimized with 5 trials, with 20_000 steps of training",
+    #             name = "optimized_full_compressed_data_15e", 
+    #              ), 
 
-            dict(
-                path = r"compressed_checkpoint_20e\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-                description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Optimized with 5 trials, with 20_000 steps of training",
-                name = "optimized_full_compressed_data_20e", 
-                 ), 
-            dict(
-                path = r"compressed_checkpoint_20e\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
-                description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Default Parameters, with 20_000 steps of training",
-                name = "default_full_compressed_data_20e", 
-                 ), 
-        ]
-    )
+    #         dict(
+    #             path = r"compressed_checkpoint_20e\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+    #             description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Optimized with 5 trials, with 20_000 steps of training",
+    #             name = "optimized_full_compressed_data_20e", 
+    #              ), 
+    #         dict(
+    #             path = r"compressed_checkpoint_20e\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
+    #             description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Default Parameters, with 20_000 steps of training",
+    #             name = "default_full_compressed_data_20e", 
+    #              ), 
+    #     ]
+    
+    pipe = Pipeline.from_config("non_compressed_checkpoint\config.json")
+    data = load_data(start_time='2023-01-01', end_time='2025-07-31', stock_names=None)
+    r = pipe.predict(data)
+    print(r)

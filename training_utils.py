@@ -36,15 +36,30 @@ def define_env(data_path,
                start_date_trade, 
                end_date_trade, 
                env_params, 
-               default_env=True):  
+               default_env=True, 
+               trade_only = False ):  
     data  = pd.read_csv(data_path)
-    
-    # Okay, first, we split data 
-    train = data_split(data, start_date, end_date)
-    trade = data_split(data, start_date_trade, end_date_trade)
+    results = {} 
 
-    print(f'Number of training samples: {len(train)}')
-    print(f'Number of testing samples: {len(trade)}')
+    if trade_only: 
+        
+        data = data.sort_values(['date', "tic"], ignore_index=True)
+        data.index = data['date'].factorize()[0]
+        
+        trade = data 
+        results['trade_df'] = trade
+         
+        print(f'Number of samples: {len(trade)}')
+        
+    else: 
+        train = data_split(data, start_date, end_date)
+        results['train_df'] = train
+
+        trade = data_split(data, start_date_trade, end_date_trade)
+        results['trade_df'] = trade 
+
+        print(f'Number of training samples: {len(train)}')
+        print(f'Number of testing samples: {len(trade)}')
 
     # Calculate environment dimensions
     num_assets = len(data['tic'].unique())
@@ -59,8 +74,8 @@ def define_env(data_path,
         features = INDICATORS
         state_dim = 1 + 2 * num_assets + len(features) * num_assets
 
-
     print(f"Assets: {num_assets}, State Dimension: {state_dim}")
+    print("IMPORTANT!!!!", data.columns )
 
     # Configure trading environment
     env_kwargs = {
@@ -78,18 +93,17 @@ def define_env(data_path,
     })
 
     if default_env: 
-        e_train_gym = StockTradingEnv(df=train, **env_kwargs)
-        e_trade_gym = StockTradingEnv(df=trade, turbulence_threshold=None, **env_kwargs)
-    else: 
-        e_train_gym = TradingEnvBlendSharpeRation(df=train, **env_kwargs)
-        e_trade_gym = TradingEnvBlendSharpeRation(df=trade.reset_index(drop=True), turbulence_threshold=None, **env_kwargs)
+        if trade_only == False: 
+            results['train_env']= StockTradingEnv(df=train, **env_kwargs)
 
-    return {
-        "train_env": e_train_gym, 
-        "trade_env": e_trade_gym, 
-        "train_df": train, 
-        "trade_df": trade
-    }
+        results['trade_env'] = StockTradingEnv(df=trade, turbulence_threshold=None, **env_kwargs)
+    else: 
+        if trade_only == False: 
+            results['train_env']= TradingEnvBlendSharpeRation(df=train, **env_kwargs)
+
+        results['trade_env'] = TradingEnvBlendSharpeRation(df=trade.reset_index(drop=True), turbulence_threshold=None, **env_kwargs)
+
+    return results
 
 
 
@@ -251,3 +265,72 @@ def validate_model_by_path(info):
     print("---Performanse Stats saved into {}---".format(results_path))
     
  
+def predict_model_path_data_by_path(info:dict = {}, # must contain 
+            # data_path, 
+            # model_path, 
+            # model_policy, 
+            # output_saving_dir, 
+            # env_params = {}, 
+            # default_env = True, 
+            *args, 
+            **kwargs
+            ): 
+    from stable_baselines3 import PPO, SAC, DDPG
+    """
+    Arguments if info Dictionary: 
+        data_path - path to saved data 
+        model_path - path to saved model 
+        model_policy - the name of models policy, the available model_policy variants now is ["ppo", "sac", and "ddgp"]
+        output_saving_dir - folder where the df_account_value, df_actions files will be saved 
+
+        env_params = {}, setting for FinRls Trading Enviroment 
+        default_env = True, If True uses the standart FinRLs TradingEnviroment, if False, uses Experimental one
+    Returns: 
+        the path to saved df_account_value, df_actions results 
+    """
+    data_path = info.get('data_path')
+    model_path = info.get('model_path')
+    model_policy = info.get('model_policy')
+    output_saving_dir = info.get('output_saving_dir')
+    env_params = info.get('env_params', {})
+    default_env = info.get('default_env', True)
+    # Data processing and envs 
+    data = pd.read_csv (data_path)
+    env_params = define_env(data_path, 
+               start_date = '', 
+               end_date = '', 
+               start_date_trade = '', 
+               end_date_trade = '', 
+               env_params = env_params, 
+               default_env=default_env, 
+               trade_only = True)
+
+    trade_env = env_params['trade_env']
+
+    # Loading model 
+    if model_policy == "ppo": 
+        tuned_model = PPO
+    elif model_policy == "sac": 
+        tuned_model = SAC
+    else: 
+        print("didnt find model policy available")
+
+    tuned_model = tuned_model.load(model_path)
+
+    # Predicting 
+    df_account_value, df_actions = DRLAgent.DRL_prediction(
+    model=tuned_model,
+    environment=trade_env)
+    
+    # Saving 
+    os.makedirs(output_saving_dir, exist_ok=True )
+    df_account_value_path = join(output_saving_dir, "account_value.csv")
+    df_account_value.to_csv(df_account_value_path, index = False )
+
+    df_actions_path = join(output_saving_dir, "actions.csv")
+    df_actions.to_csv(df_actions_path, index=False )
+    
+    return {"accaunt_value_path": df_account_value_path, 
+            "actions_path": df_actions_path, 
+            "model_name": os.path.basename(model_path)}
+    
