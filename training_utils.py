@@ -101,11 +101,9 @@ def define_env(data_path,
         if trade_only == False: 
             results['train_env']= TradingEnvBlendSharpeRation(df=train, **env_kwargs)
 
-        results['trade_env'] = TradingEnvBlendSharpeRation(df=trade.reset_index(drop=True), turbulence_threshold=None, **env_kwargs)
+        results['trade_env'] = TradingEnvBlendSharpeRation(df=trade, turbulence_threshold=None, **env_kwargs)
 
     return results
-
-
 
 def train_from_params(model_policy, 
                         training_total_steps, 
@@ -198,7 +196,6 @@ def train_from_params_path(info, ):
         "saved_path": model_save_path
     }
 
-
 def add_trade_perf_metric(df_actions, 
                           perf_stats_all,
                           trade, 
@@ -261,10 +258,10 @@ def validate_model_by_path(info):
     results_path = join(result_dir, "perf_stats_" + os.path.basename(info['model_path']) + '.csv')
     os.makedirs(result_dir, exist_ok=True)
 
+    perf_stats_all_tuned = perf_stats_all_tuned.fillna(0)
     perf_stats_all_tuned.to_csv(results_path)
     print("---Performanse Stats saved into {}---".format(results_path))
     
- 
 def predict_model_path_data_by_path(info:dict = {}, # must contain 
             # data_path, 
             # model_path, 
@@ -331,3 +328,61 @@ def predict_model_path_data_by_path(info:dict = {}, # must contain
     return {"predicted_action": predicted_action, 
             "model_name": os.path.basename(model_path)}
     
+
+
+def compare_validation_results(validation_tables_path: list, saving_dir = 'comparison_results'):
+    """
+    Arguments: 
+        validation_tables_path must be like
+        [
+            {"name": "run_number1", 
+             "path": "run_number1_results.csv", 
+             "description": "What trained with compression"},
+            ...
+        ]
+
+    Returns: 
+        Saves the summary table and comparison plots with results
+        Returns dict with paths to saved objects
+    """
+    results_df = pd.DataFrame()
+
+    for result in validation_tables_path:
+        df = pd.read_csv(result["path"], index_col=0)
+        df = df.rename(columns={"Value": result["name"]})
+        results_df = pd.concat([results_df, df[result["name"]]], axis=1)
+
+    # Transpose for easier plotting
+    results_df_T = results_df.T
+    results_df_T["Description"] = [x["description"] for x in validation_tables_path]
+
+    os.makedirs(saving_dir, exist_ok=True)
+    summary_path = join(saving_dir, "summary_table.csv")
+    results_df_T.to_csv(summary_path)
+
+    # Plot Sharpe ratio & Trade performance comparison
+    plot_path = "comparison_results/sharpe_trade_perf_comparison.png"
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    bar_width = 0.35
+    index = range(len(results_df_T))
+    
+    ax1.bar([i - bar_width/2 for i in index], results_df_T["Sharpe ratio"], 
+            bar_width, label='Sharpe Ratio', color='skyblue')
+    ax1.bar([i + bar_width/2 for i in index], results_df_T["Trade_Perf"], 
+            bar_width, label='Trade Performance', color='salmon')
+
+    ax1.set_xticks(index)
+    ax1.set_xticklabels(results_df_T.index, rotation=45, ha='right')
+    ax1.set_ylabel("Metrics")
+    ax1.set_title("Sharpe Ratio & Trade Performance Comparison")
+    ax1.legend()
+    plt.tight_layout()
+    plt.savefig(plot_path)
+    plt.close()
+
+    return {
+        "summary_table": summary_path,
+        "plot": plot_path
+    }
+

@@ -1,81 +1,383 @@
-# Trading Agent with FinRL, AutoEncoders and multiprocessing 
+# 🧠 Reinforcement Learning-Based Trading Agent with AutoEncoders, Optuna, FinRL and multiprocessing
 
-This project documents the process of training a stock trading agent using a **Reinforcement Learning (RL)** approach with advanced methods.
+This project presents a professional-grade **reinforcement learning (RL) trading agent** trained on **multi-asset stock data** using the [FinRL](https://github.com/AI4Finance-Foundation/FinRL) framework. The agent is enhanced with **custom data preprocessing**, **autoencoder-based compression**, **PCA analysis**, and **hyperparameter optimization using Optuna**.  
 
----
-
-### Tasks
-
-- **Install Dependencies** ✅
-    ```bash
-    pip install git+[https://github.com/AI4Finance-Foundation/FinRL.git](https://github.com/AI4Finance-Foundation/FinRL.git)
-    pip install stockstats
-    ```
-
-- **Download Data** ✅
-
-- **Fill NaNs and Add MACD, RSI Scores for Stocks** ✅
-
-- **Add Day of the Week, Day of the Month, etc.** ✅
-
-- **Train the Autoencoder to Compress Huge Data into Simpler Values** ✅
-
-    An **Autoencoder** is used to reduce the dimensionality of the extensive market data. By compressing the raw stock features into a lower-dimensional representation, the Autoencoder helps simplify the input for the reinforcement learning agent. This can lead to faster training and better generalization by capturing the most salient features of the data.
-
-- **Switch Reward Function in FinRL TradingEnv to Sharpe Ratio Reward Function** ✅
-
-    The standard reward function in FinRL's `TradingEnv` was replaced with a **Sharpe Ratio**-based reward. The Sharpe Ratio measures risk-adjusted return, calculated as the average return earned in excess of the risk-free rate per unit of volatility or total risk. By optimizing for Sharpe Ratio, the agent is incentivized to not only maximize returns but also to do so with minimal risk, leading to more robust and stable trading strategies.
-
-- **Add the Optimization Process with Optuna to Find the Best Hyperparameters** ✅
-
-    **Optuna**, an automatic hyperparameter optimization framework, was integrated into the training pipeline. This allows for systematic exploration of the hyperparameter space for the **PPO (Proximal Policy Optimization)** algorithm used in FinRL. Optuna helps identify the optimal combination of hyperparameters that maximize the trading agent's performance (e.g., higher Sharpe Ratio, lower drawdown).
-
-- **validation**
-- **GPU**
+The goal is to create a robust, risk-aware agent capable of operating on real historical stock data, optimizing for long-term returns while minimizing volatility — measured via **Sharpe Ratio** and other professional trading metrics.
 
 ---
 
-### Optuna Optimization Results of PPO FinRL Training
+## ✨ Key Features
 
-The following images illustrate the results from the Optuna hyperparameter optimization process for the PPO agent's training.
+- 📈 **Multi-stock agent**: RL agent predicts actions for 25+ stocks simultaneously (`Buy`, `Hold`, or `Sell` per asset).
+- 🧠 **Autoencoder compression**: Compresses high-dimensional financial data into 7-dimensional latent vectors while preserving 96–99% reconstruction accuracy.
+- 📊 **Reward engineering**: Combines FinRL's default reward with a **Sharpe Ratio-based custom reward** to improve risk-adjusted performance.
+- 🔍 **Hyperparameter tuning**: Automated search using **Optuna**, optimizing PPO agents on Sharpe Ratio, reward stability, and other metrics.
+- 🛠️ **Modular pipeline**: A central `Pipeline` class (see `main.py`) handles **data preprocessing, training, validation, optimization, config saving/loading** — all cleanly structured.
+- 🧪 **Extensive validation**: Backtests over multiple datasets with different compression techniques, custom envs, and parameter sets — all metrics logged and visualized.
+- 🔁 **Multiprocessing**: Parallelized training and validation to reduce time and support large-scale experimentation.
+- 🚀 **FastAPI interface**: Includes a lightweight API server for serving trained agents (`/predict` and `/validate` endpoints).
 
-#### Empirical Distribution Function (EDF) of Optimization History
+---
 
-This plot shows the cumulative distribution of the objective values (e.g., Sharpe Ratio) obtained during the Optuna optimization trials. A steeper curve generally indicates that a significant number of trials achieved higher objective values, suggesting efficient exploration and convergence towards better solutions.
+## 🧰 Project Workflow
+
+This project is designed with modularity and reproducibility in mind. A centralized `Pipeline` class (see `main.py`) manages the entire process, including data handling, training, and evaluation.  
+
+You can perform any of the following core tasks by changing the config mode:
+
+- 🏗️ **Mode: create**  
+  Initializes new datasets from raw data. Supports pre-processing, feature selection, and compression (AutoEncoder, PCA, or raw).
+
+- 🤖 **Mode: train**  
+  Trains the RL agent using Proximal Policy Optimization (PPO) from FinRL. Logging is handled by TensorBoard.
+
+- 📊 **Mode: validate**  
+  Evaluates agent performance on unseen data (test set). Generates metrics like Sharpe Ratio, Total Return, and visualized trades.
+
+- ⚙️ **Mode: optimize**  
+  Runs **Optuna** for hyperparameter search across PPO agent configs. Each trial is validated and compared by Sharpe ratio and risk measures.
+
+- 💾 **Mode: load_config**  
+  Reuses previously saved hyperparameter configurations for retraining or serving.
+
+Each run automatically creates a structured directory under `results/`, storing:
+
+- Environment settings and model configs
+- Logs (CSV, JSON)
+- Tensorboard scalars
+- Plots and performance graphs
+
+
+## 🔬 Model Comparison & Optimization
+
+This project includes thorough experimentation with different data processing pipelines, reward structures, and PPO hyperparameters. Optimization was done using [Optuna](https://optuna.org/) with both default and custom reward functions.
+
+The best results came from using:
+- A **custom reward function**: `Sharpe + 0.5 × default reward`
+- A **custom environment** that stabilizes volatility and emphasizes consistent growth
+- Surprisingly, **default PPO hyperparameters** outperformed all tuned ones after long training (100k steps)
+
+### 📌 Key Metrics for Best Performing Model (Default Params + Custom Env)
+| Metric                  | Value    |
+|------------------------|----------|
+| Annual Return          | **20.69%** |
+| Cumulative Return      | 18.72%   |
+| Sharpe Ratio           | **1.68** |
+| Calmar Ratio           | 2.89     |
+| Max Drawdown           | -7.14%   |
+| Sortino Ratio          | **2.50** |
+| Trade Perf (Win/Loss)  | **7.20** |
+
+### 📸 Sample Screenshot (Best Checkpoint)
+
+![Training reward metrics](non_default_env_checkpoint_max/training_logs/image_2025-08-05_23-15-35.png)
+
+This TensorBoard snapshot shows key reward metrics after training the default PPO model for 100,000+ steps:
+
+- `reward_max`: Peaks as high as **24.19**, suggesting strong individual episodes.
+- `reward_mean`: Steady upward trend to **~0.15**, confirming policy improvement.
+- `reward_min`: Occasionally drops to **-33**, due to PPO's inherent exploration.
+
+These logs demonstrate stable and progressive learning over time, validating the effectiveness of the custom reward function.
+
+
+### 🧪 Experiment Summary (20k Steps)
+
+| Name | Sharpe | Calmar | Max DD | Trade Perf | Notes |
+|------|--------|--------|--------|-------------|-------|
+| 🏆 `default_pca_custom_env_max` | **1.68** | **2.89** | -7.1% | **7.20** | Custom env + PCA, no compression, 100k steps |
+| `optimized_pca_custom_env_max` | 1.53 | 2.99 | -6.2% | 2.32 | 25 trials, 10k steps |
+| `default_full_compressed_data_20e` | 1.20 | 1.88 | -8.0% | 2.16 | AutoEncoder + PCA (20e), default params |
+| `optimized_full_compressed_data_15e` | 0.57 | 0.64 | -8.1% | 2.77 | AutoEncoder (15e), PCA, optimized |
+| `optimized_non_compressed` | 1.16 | 2.06 | -7.2% | 3.47 | Raw data, 5 trials |
+| `default_non_compressed` | 0.94 | 1.57 | -7.5% | 1.73 | Raw data, no tuning |
+
+![Training reward metrics](comparison_results\sharpe_trade_perf_comparison.png)
+
 
 ![Empirical Distribution Function](pipeline_checkpoint\opt_results_ppo_50\emp_dist_func.png)
 
-#### Optimization History
-
-This graph visualizes the objective value (e.g., Sharpe Ratio) over each trial during the Optuna optimization. It helps in understanding the search process, showing how the model's performance improved or varied as different hyperparameter combinations were explored. A clear upward trend or stabilization at a high value suggests effective optimization.
-
 ![Optimization History](pipeline_checkpoint\opt_results_ppo_50\opt_hist.png)
 
-#### Hyperparameter Importances
-
-This chart indicates the relative importance of each hyperparameter in influencing the objective function (e.g., Sharpe Ratio). Hyperparameters with higher importance scores had a more significant impact on the trading agent's performance during the optimization process, helping to identify which parameters are crucial for fine-tuning.
 
 ![Parameter Importances](pipeline_checkpoint\opt_results_ppo_50\params_importances.png)
 
-## 📊 Validation Results Experiments and Results
 
-Here’s a comparison of all models based on validation metrics:
+> 📌 Full experiment table [available in CSV format](comparison_results\summary_table.csv)
+--- 
 
-| Model | Annual return | Sharpe ratio | Calmar ratio | Max drawdown | Trade_Perf | Description |
-|---|---|---|---|---|---|---|
-| optimized_non_compressed | 0.1488 | 1.1651 | 2.0604 | -0.0722 | 3.4673 | Optimization with 5 Trials, with 20_000 steps of training |
-| default_non_compressed | 0.1189 | 0.9398 | 1.5720 | -0.0756 | 1.7331 | Default hiperparameters, with 20_000 steps of training |
-| optimized_non_compressed_non_pca | 0.1054 | 0.8518 | 1.2520 | -0.0842 | 5.7167 | No PCA analisys in dataprocessing, Optimized with 5 Trials, with 20_000 steps of training |
-| default_non_compressed_non_pca | 0.0868 | 0.8896 | 1.3477 | -0.0644 | 2.0119 | No PCA analisys in dataprocessing, Default parameters, with 20_000 steps of training |
-| optimized_full_compressed_data_15e | 0.0525 | 0.5673 | 0.6486 | -0.0810 | 2.7690 | Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (15 epochs), Optimized with 5 trials, with 20_000 steps of training |
-| optimized_full_compressed_data_20e | 0.0946 | 0.9175 | 1.2235 | -0.0774 | 1.7919 | Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Optimized with 5 trials, with 20_000 steps of training |
-| default_full_compressed_data_20e | 0.1509 | 1.2093 | 1.8840 | -0.0801 | 2.1637 | Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Default Parameters, with 20_000 steps of training |
+### 🧠 AutoEncoder-based Feature Compression (Experimental)
+
+As part of my exploration into improving the Deep Reinforcement Learning (DRL) agent's performance, I implemented a custom AutoEncoder module to compress high-dimensional state inputs into a more compact latent representation.
+
+This aimed to:
+
+* Reduce noise and redundancy in financial time-series features
+* Improve learning speed and generalization
+* Test performance impact of compressed vs raw inputs
+
+#### 🛠️ Architecture Variants
+
+Two AutoEncoder variants were implemented:
+
+* **Simple**: Shallow encoder-decoder structure with 256 → 128 → `latent_dim`
+* **Deep** (used in all experiments): 256 → 128 → 512 → `latent_dim`, with optional `tanh` at the output
+
+```python
+# Example encoder from Deep AE (used in results):
+nn.Sequential(
+    nn.Linear(input_dim, 256),
+    nn.ReLU(),
+    nn.Linear(256, 128),
+    nn.ReLU(),
+    nn.Linear(128, 512), 
+    nn.ReLU(),
+    nn.Linear(512, latent_dim)  # Optional nn.Tanh() output
+)
+```
+
+#### ⚙️ Training & Integration
+
+* AutoEncoder was trained *prior* to DRL training on the full dataset
+* Reconstruction loss used: **MSE**
+* The encoder was then frozen and used to transform the input features before being fed into the RL agent
+
+#### 📊 Observations
+
+* While AutoEncoder-based compressed data did **not** consistently outperform raw features or PCA across all environments...
+* It still showed **competitive results** in certain configurations (e.g. `optimized_full_compressed_data_20e`)
+* Helped reduce overfitting in some shorter training runs
+
+#### 🌱 Lessons Learned
+
+> Incorporating learned latent spaces into RL pipelines is promising but delicate — too much compression can reduce important signals. Further improvements could include:
+>
+> * Sequence-aware compression (e.g. LSTM AutoEncoders)
+> * Variational or contrastive representation learning
+> * Hybrid latent + raw feature fusion
 
 
-### Sharpe Ratio and Trading performance metrics plots
-![Sharpe Ratio and Trading performance plots](comparison_results\sharpe_trade_perf_comparison.png)
+### 🧠 DRL Agent Training Pipeline
+
+This section outlines the reinforcement learning pipeline used to train a stock trading agent.
+
+#### 🧩 Framework
+
+- **Library**: [Stable Baselines3](https://github.com/DLR-RM/stable-baselines3)
+- **Algorithm**: PPO (Proximal Policy Optimization)
+- **Training Duration**: Configurable via `training_timesteps` in `config.json`
+- **Feature Encoding**: Uses raw, PCA, or AutoEncoder-compressed features depending on config
+
+> All agent-related settings and flags (model name, encoding, custom reward, etc.) are controlled via `config.json`.
+
+#### 🔁 Pipeline Overview
+
+```text
+DataLoader 
+ → Optional Feature Compressor (AutoEncoder / PCA)
+ → FinRL-Compatible Custom Environment
+ → Optuna Hyperparameter Optimizer (optional)
+ → Stable Baselines3 PPO Agent Training
+ → Evaluation & Logging (TensorBoard, plots, metrics)
+```
+
+- 📉 **Custom Reward Function**: A hybrid function combining Sharpe ratio and default FinRL rewards:
+  ```
+  reward = sharpe + 0.5 * default_reward
+  ```
+- 📊 **Metrics Tracked**:
+  - Sharpe Ratio
+  - Average Win/Loss
+  - Daily Returns
+  - Final Portfolio Value
+  - Action Distribution
+
+#### 🧪 Hyperparameter Tuning
+
+If enabled in config, the system runs Optuna optimization trials (e.g. 5 or 25) across:
+
+- Learning rate
+- AutoEncoder latent size
+- Feature encoding type
+- Reward function toggle
+- Training duration
+
+> The best configuration is then saved and used for final training.
+
+---
+
+📷 Best checkpoint training curves are visualized via TensorBoard.  
+A sample plot is available in:
+```
+non_default_env_checkpoint_max/training_logs/image_2025-08-05_23-15-35.png
+```
+
+```python
+# Example config (simplified)
+  auto_encoder_training_params: dict = {},
+  env_params: dict = {},
+  A2C_model_kwargs: dict = {},
+  PPO_model_kwargs: dict = {},
+  DDPG_model_kwargs: dict = {},
+  SAC_model_kwargs: dict = {},
+  TD3_model_kwargs: dict = {},
+  timesteps_dict: dict = {},
+  opt_metrics:dict = {}, 
+
+
+  compress_data_with_autoencoder = True,
+  one_hot_date_features = True,
+  pca_analisys = True,
+  checkpoint_dir = "pipeline_checkpoint",
+
+  model_policy = "ppo", 
+  tp_metric = 'avgwl',   # specified trade_param_metric: ratio avg value win/loss
+  default_env = True, 
+  training_total_steps = 50_000, 
+  tickers_in_data = []
+```
+
+---
+
+This modular pipeline enables fast experimentation and reproducible DRL training workflows tailored to financial markets.
+
+## 📁 Project Structure
+
+The project is organized into clear functional modules to support preprocessing, training, evaluation, and deployment.
+
+```
+
+project-root/
+├── comparison\_results/                # Comparison charts and metrics (Sharpe, table, etc.)
+│   ├── sharpe\_trade\_perf\_comparison.png
+│   └── summary\_table.csv
+│
+├── compressed\_checkpoint\_20e/        # Saved checkpoints (e.g. smaller models for testing)
+│
+├── data\_processing/                  # All logic related to data preprocessing and compression
+│   ├── autoencoder/                  # Autoencoder model definition and training (optional)
+│   │   ├── **init**.py
+│   │   ├── model.py
+│   │   └── trainer.py
+│   ├── autoencoder\_processing.py     # Preprocessing script using trained AE model
+│   ├── data\_processing.py            # Main feature engineering pipeline
+│   ├── load\_data.py                  # Raw data loader (from Yahoo Finance)
+│   ├── test.py                       # Utility for data pipeline testing
+│   └── **pycache**/                  # Python cache files (ignored)
+│
+├── datasets/                         # Folder for storing raw or preprocessed datasets
+│
+├── env\_train\_settings/              # Custom FinRL gym environment
+│   ├── env.py                        # Custom trading logic and reward shaping
+│   └── **init**.py
+│
+├── optimization\_logging.py          # Optuna logging and visualization
+├── optimization\_sampling.py         # Hyperparameter sampling strategy (Optuna)
+├── trade\_performance\_code.py        # Final evaluation metrics and summaries
+│
+├── main.py                          # Entry point for full training + evaluation pipeline
+├── config.py                        # Loads and parses `config.json` hyperparameters
+├── config.json                      # Main configuration file (env settings, toggles, etc.)
+│
+├── df\_actions.csv                   # Logs of actions taken during final trading episode
+│
+├── app.py                           # \[Optional] If API or demo interface is added
+├── test\_app.py                      # Tests for API if developed
+│
+├── Dockerfile                       # Docker setup for containerized usage
+├── .dockerignore
+├── .gitignore
+│
+├── README.md                        # You're reading it 😉
+└── requirements.txt                 # All Python dependencies
+
+```
+
+## 🚀 How to Run the Project
+
+To launch the full training pipeline with custom configuration, simply run:
+
+```python
+python main.py
+````
+
+This will:
+
+* Load and process stock data
+* Run hyperparameter optimization (using Optuna)
+* Train DRL models with multi-training support
+* Evaluate and validate saved models
+* Save your final config for reproducibility
+
+You can configure everything from `config.py`, including:
+
+* Date ranges for training and trading
+* Autoencoder usage and feature encoding
+* Environment choice (default/custom)
+* Total training steps
+* Optimization trial count, metric preferences, etc.
+
+### ✅ Example Pipeline (Advanced Usage)
+
+For finer control, here’s a sample script using the `Pipeline` class:
+
+```python
+from main import Pipeline
+import config
+from training_utils import compare_validation_results
+
+if __name__ == "__main__":
+    pipe = Pipeline(
+        start_date=config.TRAIN_START_DATE,
+        end_date=config.TRAIN_END_DATE,
+        start_date_trade=config.TRADE_START_DATE,
+        end_date_trade=config.TRADE_END_DATE,
+        compress_data_with_autoencoder=False,
+        one_hot_date_features=False,
+        pca_analisys=True,
+        checkpoint_dir='new_checkpoint',
+        default_env=False,
+        training_total_steps=100_000,
+        opt_metrics={'n_trials': 25}
+    )
+
+    dataframe, datapath = pipe.data_process()
+    pipe.optimize(datapath)
+    pipe.train(datapath)
+    pipe.validate_saved_models(datapath)
+    pipe.save_config()
+
+    # Compare the validation results along all experiments 
+    models_data = [
+        {
+            "path": r"non_compressed_checkpoint\\validation_results\\perf_stats_opt_results_ppo_5_20000.pth.csv",
+            "description": "Optimization with 5 Trials, 20K training steps",
+            "name": "optimized_non_compressed",
+        },
+        {
+            "path": r"non_compressed_checkpoint\\validation_results\\perf_stats_ppo_20000_20000.pth.csv",
+            "description": "Default hyperparameters, 20K training steps",
+            "name": "default_non_compressed",
+        },
+        # ... Add more comparison entries if needed
+    ]
+
+    compare_validation_results(models_data)
+```
+
+---
+
+✅ **Output** includes:
+
+* TensorBoard logs
+* Model checkpoints (in `checkpoint_dir`)
+* Validation stats (.csv)
+* Comparison plots (in `comparison_results/`)
+
+> 💡 Use `tensorboard --logdir <your_log_dir>` to inspect training curves.
 
 
 # Dependencies 
 
 This project was build on Python 3.10.11
+All required python libraries can be installed from ```requirements.txt```

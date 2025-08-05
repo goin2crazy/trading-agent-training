@@ -598,7 +598,7 @@ class Pipeline():
             "checkpoint_dir": self.checkpoint_dir
             } for dir in optimization_result_dirs]
 
-        num_workers = 5 # multiprocessing.cpu_count()
+        num_workers = min(multiprocessing.cpu_count(), len(infoss))
         print("---{} Processes will work in paralell---".format(num_workers))
         with multiprocessing.Pool(num_workers) as pool:
             training_results = pool.map(train_from_params_path, infoss)
@@ -713,107 +713,41 @@ class Pipeline():
         
         return outputs
 
-def compare_validation_results(validation_tables_path: list):
-    """
-    Arguments: 
-        validation_tables_path must be like
-        [
-            {"name": "run_number1", 
-             "path": "run_number1_results.csv", 
-             "description": "What trained with compression"},
-            ...
-        ]
-
-    Returns: 
-        Saves the summary table and comparison plots with results
-        Returns dict with paths to saved objects
-    """
-    results_df = pd.DataFrame()
-
-    for result in validation_tables_path:
-        df = pd.read_csv(result["path"], index_col=0)
-        df = df.rename(columns={"Value": result["name"]})
-        results_df = pd.concat([results_df, df[result["name"]]], axis=1)
-
-    # Transpose for easier plotting
-    results_df_T = results_df.T
-    results_df_T["Description"] = [x["description"] for x in validation_tables_path]
-
-    os.makedirs("comparison_results", exist_ok=True)
-    summary_path = "comparison_results/summary_table.csv"
-    results_df_T.to_csv(summary_path, index=False)
-
-    # Plot Sharpe ratio & Trade performance comparison
-    plot_path = "comparison_results/sharpe_trade_perf_comparison.png"
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-
-    bar_width = 0.35
-    index = range(len(results_df_T))
-    
-    ax1.bar([i - bar_width/2 for i in index], results_df_T["Sharpe ratio"], 
-            bar_width, label='Sharpe Ratio', color='skyblue')
-    ax1.bar([i + bar_width/2 for i in index], results_df_T["Trade_Perf"], 
-            bar_width, label='Trade Performance', color='salmon')
-
-    ax1.set_xticks(index)
-    ax1.set_xticklabels(results_df_T.index, rotation=45, ha='right')
-    ax1.set_ylabel("Metrics")
-    ax1.set_title("Sharpe Ratio & Trade Performance Comparison")
-    ax1.legend()
-    plt.tight_layout()
-    plt.savefig(plot_path)
-    plt.close()
-
-    return {
-        "summary_table": summary_path,
-        "plot": plot_path
-    }
-
-
 
 if __name__ == "__main__":
-    # Compare the validation results 
-    # models_data = [
-    #         dict(
-    #             path = r"non_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-    #             description = "Optimization with 5 Trials, with 20_000 steps of training", 
-    #             name = "optimized_non_compressed", 
-    #              ), 
-    #         dict(
-    #             path = r"non_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
-    #             description = "Default hiperparameters, with 20_000 steps of training",
-    #             name = "default_non_compressed", 
-    #              ), 
-    #         dict(
-    #             path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-    #             description = "No PCA analisys in dataprocessing, Optimized with 5 Trials, with 20_000 steps of training",
-    #             name = "optimized_non_compressed_non_pca", 
-    #              ), 
-    #         dict(
-    #             path = r"non_pca_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
-    #             description = "No PCA analisys in dataprocessing, Default parameters, with 20_000 steps of training",
-    #             name = "default_non_compressed_non_pca", 
-    #              ), 
+    # Pipeline from main.py 
+    pipe = Pipeline(start_date=config.TRAIN_START_DATE, 
+                    end_date=config.TRAIN_END_DATE, 
+                    start_date_trade=config.TRADE_START_DATE, 
+                    end_date_trade=config.TRADE_END_DATE, 
+                    compress_data_with_autoencoder=False, 
+                    one_hot_date_features=False, 
+                    pca_analisys=True, 
+                    checkpoint_dir='new_checkpoint' ,
+                    default_env=False, 
+                    training_total_steps=100_000,
+                    opt_metrics={'n_trials':25})
+    dataframe, datapath = pipe.data_process() # load and processes stocks data 
+    pipe.optimize(datapath)
+    pipe.train(datapath) # there is used multitraining
+    pipe.validate_saved_models(datapath) # there is too 
+    pipe.save_config()
 
-    #         dict(
-    #             path = r"pipeline_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-    #             description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (15 epochs), Optimized with 5 trials, with 20_000 steps of training",
-    #             name = "optimized_full_compressed_data_15e", 
-    #              ), 
 
-    #         dict(
-    #             path = r"compressed_checkpoint_20e\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
-    #             description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Optimized with 5 trials, with 20_000 steps of training",
-    #             name = "optimized_full_compressed_data_20e", 
-    #              ), 
-    #         dict(
-    #             path = r"compressed_checkpoint_20e\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
-    #             description = "Data processing with Data one hot encodeing, PCA analisys, and compression with autoencoders (20 epochs), Default Parameters, with 20_000 steps of training",
-    #             name = "default_full_compressed_data_20e", 
-    #              ), 
-    #     ]
+    # Compare the validation results along all experiments 
+    models_data = [
+            dict(
+                path = r"non_compressed_checkpoint\validation_results\perf_stats_opt_results_ppo_5_20000.pth.csv", 
+                description = "Optimization with 5 Trials, with 20_000 steps of training", 
+                name = "optimized_non_compressed", 
+                 ), 
+            dict(
+                path = r"non_compressed_checkpoint\validation_results\perf_stats_ppo_20000_20000.pth.csv", 
+                description = "Default hiperparameters, with 20_000 steps of training",
+                name = "default_non_compressed", 
+                 ), 
+            ...
+        ]
     
-    pipe = Pipeline.from_config("non_compressed_checkpoint\config.json")
-    data = load_data(start_time='2023-01-01', end_time='2025-07-31', stock_names=None)
-    r = pipe.predict(data, remove_temp_data=False)
-    print(r)
+    # this fn from train_utils.py
+    compare_validation_results(validation_tables_path=models_data)
