@@ -92,15 +92,15 @@ These logs demonstrate stable and progressive learning over time, validating the
 | `optimized_non_compressed` | 1.16 | 2.06 | -7.2% | 3.47 | Raw data, 5 trials |
 | `default_non_compressed` | 0.94 | 1.57 | -7.5% | 1.73 | Raw data, no tuning |
 
-![Training reward metrics](comparison_results\sharpe_trade_perf_comparison.png)
+![Training reward metrics](comparison_results/sharpe_trade_perf_comparison.png)
 
 
-![Empirical Distribution Function](pipeline_checkpoint\opt_results_ppo_50\emp_dist_func.png)
+![Empirical Distribution Function](pipeline_checkpoint/opt_results_ppo_50/emp_dist_func.png)
 
-![Optimization History](pipeline_checkpoint\opt_results_ppo_50\opt_hist.png)
+![Optimization History](pipeline_checkpoint/opt_results_ppo_50/opt_hist.png)
 
 
-![Parameter Importances](pipeline_checkpoint\opt_results_ppo_50\params_importances.png)
+![Parameter Importances](pipeline_checkpoint/opt_results_ppo_50/params_importances.png)
 
 
 > 📌 Full experiment table [available in CSV format](comparison_results\summary_table.csv)
@@ -375,6 +375,96 @@ if __name__ == "__main__":
 * Comparison plots (in `comparison_results/`)
 
 > 💡 Use `tensorboard --logdir <your_log_dir>` to inspect training curves.
+
+--- 
+
+## 🛰️ FastAPI Integration for Real-Time Inference & Validation
+
+To support **real-time inference**, this project includes a simple but functional **FastAPI server** that allows you to serve your trained trading agent via HTTP endpoints.
+
+This makes your RL agent usable by **external applications**, **dashboards**, or even **automated trading systems** 🧠📡
+
+### ✅ Available Endpoints
+
+#### **`POST /predict`**
+
+Takes in a market snapshot (`date`, `open`, `high`, `low`, `close`, `volume`, `tic`) and returns model predictions for each asset.
+
+```bash
+curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d '{...}'
+```
+
+* **Input**: JSON market data (list of floats/strings)
+* **Output**: Dict with `predicted_action` for each stock
+* **Actions**: typically `Buy` / `Hold` / `Sell` encoded as one-hot or class index
+
+#### **`POST /validate`**
+
+Receives a historical dataset and evaluates the agent on it using the internal validation pipeline.
+
+* **Output**: Returns performance metrics and all validation `.csv` files as JSON
+
+---
+
+### 🧪 Example Usage & Testing
+
+You can test your API with real historical stock data using this simple script:
+
+```python
+from finrl.config_tickers import DOW_30_TICKER
+from finrl.meta.preprocessor.yahoodownloader import YahooDownloader
+
+# Load example stock data
+df = YahooDownloader(start_date="2023-04-01",
+                     end_date="2024-07-15",
+                     ticker_list=DOW_30_TICKER).fetch_data()
+
+# Build input payload
+test_payload = {
+    "date": df["date"].astype(str).tolist(),
+    "open": df["open"].tolist(),
+    "high": df["high"].tolist(),
+    "low": df["low"].tolist(),
+    "close": df["close"].tolist(),
+    "volume": df["volume"].tolist(),
+    "tic": df["tic"].tolist()   
+}
+
+import requests
+import json
+
+# Call validation endpoint
+resp_validate = requests.post("http://127.0.0.1:8000/validate", json=test_payload)
+print("VALIDATE:", resp_validate.status_code)
+print(json.dumps(resp_validate.json(), indent=2))
+```
+
+> To start the API server:
+
+```bash
+uvicorn app:app --reload
+```
+
+---
+
+### 🧠 Behind the Scenes
+
+The API is powered by the same modular `Pipeline` used throughout the training pipeline. It loads your saved model config and checkpoints and performs:
+
+* Prediction on freshly input market snapshots
+* On-the-fly validation against unseen data
+* Automatic pre-processing and data cleaning
+* Export of validation results in a portable format
+
+---
+
+### 🌈 Real-World Ready
+
+This API is a major step toward **real-world agent deployment**. While it currently works on local data, it could easily be extended to support:
+
+* **Live market feeds**
+* **Database-backed backtesting**
+* **Cloud-based inference endpoints**
 
 
 # Dependencies 
